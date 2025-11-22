@@ -8,10 +8,23 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    
     <style>
         body {
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+        }
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
@@ -87,7 +100,6 @@
         );
 
         const BangApp = () => {
-            const [firebaseLoaded, setFirebaseLoaded] = useState(false);
             const [currentUser, setCurrentUser] = useState(null);
             const [userData, setUserData] = useState(null);
             const [activeTab, setActiveTab] = useState('home');
@@ -102,83 +114,64 @@
             const [name, setName] = useState('');
             const [transactions, setTransactions] = useState([]);
 
-            const firebaseConfig = {
-                apiKey: "AIzaSyADTlqW9GSmEcz4lvdVs8oTAunCtPQTfxA",
-                authDomain: "bang-d64bf.firebaseapp.com",
-                databaseURL: "https://bang-d64bf-default-rtdb.firebaseio.com",
-                projectId: "bang-d64bf",
-                storageBucket: "bang-d64bf.firebasestorage.app",
-                messagingSenderId: "327241018824",
-                appId: "1:327241018824:web:304c5e64494f0abe2a24fd"
-            };
-
             useEffect(() => {
-                const loadFirebase = async () => {
-                    try {
-                        const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
-                        const { getDatabase, ref, set, get, push, onValue } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js');
-                        const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+                // Inizializza Firebase
+                const firebaseConfig = {
+                    apiKey: "AIzaSyADTlqW9GSmEcz4lvdVs8oTAunCtPQTfxA",
+                    authDomain: "bang-d64bf.firebaseapp.com",
+                    databaseURL: "https://bang-d64bf-default-rtdb.firebaseio.com",
+                    projectId: "bang-d64bf",
+                    storageBucket: "bang-d64bf.firebasestorage.app",
+                    messagingSenderId: "327241018824",
+                    appId: "1:327241018824:web:304c5e64494f0abe2a24fd"
+                };
 
-                        const app = initializeApp(firebaseConfig);
-                        const db = getDatabase(app);
-                        const auth = getAuth(app);
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(firebaseConfig);
+                }
 
-                        window.firebaseApp = app;
-                        window.firebaseDb = db;
-                        window.firebaseAuth = auth;
-                        window.firebaseRef = ref;
-                        window.firebaseSet = set;
-                        window.firebaseGet = get;
-                        window.firebasePush = push;
-                        window.firebaseOnValue = onValue;
-                        window.firebaseCreateUser = createUserWithEmailAndPassword;
-                        window.firebaseSignIn = signInWithEmailAndPassword;
-                        window.firebaseOnAuthStateChanged = onAuthStateChanged;
-                        window.firebaseSignOut = signOut;
+                const auth = firebase.auth();
+                const db = firebase.database();
 
-                        setFirebaseLoaded(true);
+                // Monitora autenticazione
+                auth.onAuthStateChanged((user) => {
+                    if (user) {
+                        setCurrentUser(user);
+                        
+                        // Carica dati utente
+                        const userRef = db.ref('users/' + user.uid);
+                        userRef.on('value', (snapshot) => {
+                            const data = snapshot.val();
+                            if (data) {
+                                setUserData(data);
+                            }
+                            setInitialLoading(false);
+                        });
 
-                        onAuthStateChanged(auth, async (user) => {
-                            if (user) {
-                                setCurrentUser(user);
-                                const userRef = ref(db, 'users/' + user.uid);
-                                onValue(userRef, (snapshot) => {
-                                    const data = snapshot.val();
-                                    if (data) {
-                                        setUserData(data);
-                                    }
-                                    setInitialLoading(false);
-                                });
-
-                                const transactionsRef = ref(db, 'transactions');
-                                onValue(transactionsRef, (snapshot) => {
-                                    const data = snapshot.val();
-                                    if (data) {
-                                        const txArray = Object.entries(data).map(([id, tx]) => ({
-                                            id,
-                                            ...tx,
-                                            type: tx.from === user.uid ? 'sent' : 'received'
-                                        }))
-                                        .filter(tx => tx.from === user.uid || tx.to === user.uid)
-                                        .sort((a, b) => b.timestamp - a.timestamp);
-                                        setTransactions(txArray);
-                                    } else {
-                                        setTransactions([]);
-                                    }
-                                });
+                        // Carica transazioni
+                        const transactionsRef = db.ref('transactions');
+                        transactionsRef.on('value', (snapshot) => {
+                            const data = snapshot.val();
+                            if (data) {
+                                const txArray = Object.entries(data).map(([id, tx]) => ({
+                                    id,
+                                    ...tx,
+                                    type: tx.from === user.uid ? 'sent' : 'received'
+                                }))
+                                .filter(tx => tx.from === user.uid || tx.to === user.uid)
+                                .sort((a, b) => b.timestamp - a.timestamp);
+                                
+                                setTransactions(txArray);
                             } else {
-                                setCurrentUser(null);
-                                setUserData(null);
-                                setInitialLoading(false);
+                                setTransactions([]);
                             }
                         });
-                    } catch (error) {
-                        console.error('Errore caricamento Firebase:', error);
+                    } else {
+                        setCurrentUser(null);
+                        setUserData(null);
                         setInitialLoading(false);
-                        alert('Errore nel caricamento di Firebase. Ricarica la pagina.');
                     }
-                };
-                loadFirebase();
+                });
             }, []);
 
             const handleAuth = async () => {
@@ -186,23 +179,24 @@
                     alert('Inserisci email e password');
                     return;
                 }
-                setLoading(true);
-                try {
-                    const auth = window.firebaseAuth;
-                    const db = window.firebaseDb;
-                    const ref = window.firebaseRef;
-                    const set = window.firebaseSet;
 
+                setLoading(true);
+                const auth = firebase.auth();
+                const db = firebase.database();
+
+                try {
                     if (authMode === 'login') {
-                        await window.firebaseSignIn(auth, email, password);
+                        await auth.signInWithEmailAndPassword(email, password);
                     } else {
                         if (!name) {
                             alert('Inserisci il tuo nome');
                             setLoading(false);
                             return;
                         }
-                        const userCredential = await window.firebaseCreateUser(auth, email, password);
+
+                        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
                         const user = userCredential.user;
+                        
                         const newUserData = {
                             uid: user.uid,
                             email: user.email,
@@ -211,19 +205,29 @@
                             iban: `IT60X${Math.random().toString().slice(2, 25)}`,
                             createdAt: new Date().toISOString()
                         };
-                        await set(ref(db, 'users/' + user.uid), newUserData);
+                        
+                        await db.ref('users/' + user.uid).set(newUserData);
                         alert('Account creato con successo!');
                     }
                 } catch (error) {
                     console.error('Errore auth:', error);
                     let errorMessage = 'Errore durante l\'autenticazione';
-                    if (error.code === 'auth/email-already-in-use') errorMessage = 'Email già registrata';
-                    else if (error.code === 'auth/weak-password') errorMessage = 'Password troppo debole (minimo 6 caratteri)';
-                    else if (error.code === 'auth/invalid-email') errorMessage = 'Email non valida';
-                    else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') errorMessage = 'Email o password errate';
-                    else if (error.code === 'auth/invalid-credential') errorMessage = 'Credenziali non valide';
+                    
+                    if (error.code === 'auth/email-already-in-use') {
+                        errorMessage = 'Email già registrata';
+                    } else if (error.code === 'auth/weak-password') {
+                        errorMessage = 'Password troppo debole (minimo 6 caratteri)';
+                    } else if (error.code === 'auth/invalid-email') {
+                        errorMessage = 'Email non valida';
+                    } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+                        errorMessage = 'Email o password errate';
+                    } else if (error.code === 'auth/invalid-credential') {
+                        errorMessage = 'Credenziali non valide';
+                    }
+                    
                     alert(errorMessage);
                 }
+                
                 setLoading(false);
                 setEmail('');
                 setPassword('');
@@ -236,36 +240,36 @@
                     alert('Inserisci un importo valido');
                     return;
                 }
+                
                 if (amount > userData.balance) {
                     alert('Saldo insufficiente');
                     return;
                 }
+
                 if (!recipientEmail || recipientEmail === userData.email) {
                     alert('Email destinatario non valida');
                     return;
                 }
-                setLoading(true);
-                try {
-                    const db = window.firebaseDb;
-                    const ref = window.firebaseRef;
-                    const set = window.firebaseSet;
-                    const get = window.firebaseGet;
-                    const push = window.firebasePush;
 
-                    const usersRef = ref(db, 'users');
-                    const snapshot = await get(usersRef);
+                setLoading(true);
+                const db = firebase.database();
+
+                try {
+                    // Cerca destinatario
+                    const usersSnapshot = await db.ref('users').once('value');
+                    const users = usersSnapshot.val();
+                    
                     let recipientUid = null;
                     let recipientName = null;
-                    if (snapshot.exists()) {
-                        const users = snapshot.val();
-                        for (const uid in users) {
-                            if (users[uid].email === recipientEmail) {
-                                recipientUid = uid;
-                                recipientName = users[uid].name;
-                                break;
-                            }
+                    
+                    for (const uid in users) {
+                        if (users[uid].email === recipientEmail) {
+                            recipientUid = uid;
+                            recipientName = users[uid].name;
+                            break;
                         }
                     }
+
                     if (!recipientUid) {
                         alert('Destinatario non trovato');
                         setLoading(false);
@@ -286,36 +290,40 @@
                         timestamp: now.getTime()
                     };
 
+                    // Aggiorna saldi
                     const newBalance = userData.balance - amount;
-                    await set(ref(db, 'users/' + currentUser.uid + '/balance'), newBalance);
+                    await db.ref('users/' + currentUser.uid + '/balance').set(newBalance);
 
-                    const recipientSnapshot = await get(ref(db, 'users/' + recipientUid));
+                    const recipientSnapshot = await db.ref('users/' + recipientUid).once('value');
                     const recipientData = recipientSnapshot.val();
                     const recipientNewBalance = (recipientData.balance || 0) + amount;
-                    await set(ref(db, 'users/' + recipientUid + '/balance'), recipientNewBalance);
+                    await db.ref('users/' + recipientUid + '/balance').set(recipientNewBalance);
 
-                    await push(ref(db, 'transactions'), transaction);
+                    // Salva transazione
+                    await db.ref('transactions').push(transaction);
 
                     setShowTransferModal(false);
                     setTransferAmount('');
                     setRecipientEmail('');
+                    
                     alert(`€${amount.toFixed(2)} inviati con successo a ${recipientName}! ✅`);
                 } catch (error) {
                     console.error('Errore trasferimento:', error);
                     alert('Errore durante il trasferimento: ' + error.message);
                 }
+
                 setLoading(false);
             };
 
             const handleLogout = async () => {
                 try {
-                    await window.firebaseSignOut(window.firebaseAuth);
+                    await firebase.auth().signOut();
                 } catch (error) {
                     console.error('Errore logout:', error);
                 }
             };
 
-            if (!firebaseLoaded || initialLoading) {
+            if (initialLoading) {
                 return (
                     <div className="min-h-screen bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center">
                         <div className="text-center text-white">
@@ -332,25 +340,59 @@
                         <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-8">
                             <div className="text-center mb-8">
                                 <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-r from-purple-600 to-indigo-600 rounded-full mb-4">
-                                    <div className="w-10 h-10"><CreditCard /></div>
+                                    <div className="w-10 h-10 text-white"><CreditCard /></div>
                                 </div>
                                 <h1 className="text-4xl font-bold text-gray-900">Bang</h1>
                                 <p className="text-gray-600 mt-2">Il tuo wallet digitale</p>
                             </div>
 
                             <div className="flex mb-6 bg-gray-100 rounded-lg p-1">
-                                <button onClick={() => setAuthMode('login')} className={`flex-1 py-2 rounded-md transition-all ${authMode === 'login' ? 'bg-white shadow-sm font-semibold' : ''}`}>Login</button>
-                                <button onClick={() => setAuthMode('signup')} className={`flex-1 py-2 rounded-md transition-all ${authMode === 'signup' ? 'bg-white shadow-sm font-semibold' : ''}`}>Registrati</button>
+                                <button onClick={() => setAuthMode('login')} className={`flex-1 py-2 rounded-md transition-all ${authMode === 'login' ? 'bg-white shadow-sm font-semibold' : ''}`}>
+                                    Login
+                                </button>
+                                <button onClick={() => setAuthMode('signup')} className={`flex-1 py-2 rounded-md transition-all ${authMode === 'signup' ? 'bg-white shadow-sm font-semibold' : ''}`}>
+                                    Registrati
+                                </button>
                             </div>
 
                             <div className="space-y-4">
                                 {authMode === 'signup' && (
-                                    <input type="text" placeholder="Nome completo" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600" />
+                                    <input 
+                                        type="text" 
+                                        placeholder="Nome completo" 
+                                        value={name} 
+                                        onChange={(e) => setName(e.target.value)} 
+                                        className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600" 
+                                    />
                                 )}
-                                <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600" />
-                                <input type="password" placeholder="Password (min 6 caratteri)" value={password} onChange={(e) => setPassword(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && !loading && handleAuth()} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600" />
-                                <button onClick={handleAuth} disabled={loading} className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2">
-                                    {loading ? <><Loader /> Caricamento...</> : (authMode === 'login' ? 'Accedi' : 'Crea Account')}
+                                <input 
+                                    type="email" 
+                                    placeholder="Email" 
+                                    value={email} 
+                                    onChange={(e) => setEmail(e.target.value)} 
+                                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600" 
+                                />
+                                <input 
+                                    type="password" 
+                                    placeholder="Password (min 6 caratteri)" 
+                                    value={password} 
+                                    onChange={(e) => setPassword(e.target.value)} 
+                                    onKeyPress={(e) => e.key === 'Enter' && !loading && handleAuth()} 
+                                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600" 
+                                />
+                                <button 
+                                    onClick={handleAuth} 
+                                    disabled={loading} 
+                                    className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                >
+                                    {loading ? (
+                                        <>
+                                            <div className="w-5 h-5"><Loader /></div>
+                                            Caricamento...
+                                        </>
+                                    ) : (
+                                        authMode === 'login' ? 'Accedi' : 'Crea Account'
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -382,11 +424,17 @@
                     <div className="max-w-4xl mx-auto px-4 -mt-20">
                         <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
                             <div className="grid grid-cols-2 gap-4">
-                                <button onClick={() => setShowTransferModal(true)} className="flex flex-col items-center gap-2 p-6 bg-gradient-to-br from-purple-500 to-indigo-500 text-white rounded-xl hover:shadow-lg transition-all">
+                                <button 
+                                    onClick={() => setShowTransferModal(true)} 
+                                    className="flex flex-col items-center gap-2 p-6 bg-gradient-to-br from-purple-500 to-indigo-500 text-white rounded-xl hover:shadow-lg transition-all"
+                                >
                                     <div className="w-8 h-8"><Send /></div>
                                     <span className="font-semibold">Invia</span>
                                 </button>
-                                <button onClick={() => alert('Funzionalità in arrivo! 🚀')} className="flex flex-col items-center gap-2 p-6 bg-gradient-to-br from-green-500 to-emerald-500 text-white rounded-xl hover:shadow-lg transition-all">
+                                <button 
+                                    onClick={() => alert('Funzionalità in arrivo! 🚀')} 
+                                    className="flex flex-col items-center gap-2 p-6 bg-gradient-to-br from-green-500 to-emerald-500 text-white rounded-xl hover:shadow-lg transition-all"
+                                >
                                     <div className="w-8 h-8"><Plus /></div>
                                     <span className="font-semibold">Ricarica</span>
                                 </button>
@@ -398,11 +446,19 @@
                         </div>
 
                         <div className="flex gap-2 mb-6">
-                            <button onClick={() => setActiveTab('home')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-semibold transition-all ${activeTab === 'home' ? 'bg-white shadow-md text-purple-600' : 'text-gray-600'}`}>
-                                <div className="w-5 h-5"><Home /></div>Home
+                            <button 
+                                onClick={() => setActiveTab('home')} 
+                                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-semibold transition-all ${activeTab === 'home' ? 'bg-white shadow-md text-purple-600' : 'text-gray-600'}`}
+                            >
+                                <div className="w-5 h-5"><Home /></div>
+                                Home
                             </button>
-                            <button onClick={() => setActiveTab('transactions')} className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-semibold transition-all ${activeTab === 'transactions' ? 'bg-white shadow-md text-purple-600' : 'text-gray-600'}`}>
-                                <div className="w-5 h-5"><History /></div>Transazioni
+                            <button 
+                                onClick={() => setActiveTab('transactions')} 
+                                className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-lg font-semibold transition-all ${activeTab === 'transactions' ? 'bg-white shadow-md text-purple-600' : 'text-gray-600'}`}
+                            >
+                                <div className="w-5 h-5"><History /></div>
+                                Transazioni
                             </button>
                         </div>
 
@@ -480,20 +536,55 @@
                                 <h3 className="text-2xl font-bold mb-6">Invia denaro</h3>
                                 <div className="space-y-4">
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Email destinatario</label>
-                                        <input type="email" value={recipientEmail} onChange={(e) => setRecipientEmail(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600" placeholder="mario@email.com" />
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Email destinatario
+                                        </label>
+                                        <input 
+                                            type="email" 
+                                            value={recipientEmail} 
+                                            onChange={(e) => setRecipientEmail(e.target.value)} 
+                                            className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600" 
+                                            placeholder="mario@email.com" 
+                                        />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-semibold text-gray-700 mb-2">Importo</label>
-                                        <input type="number" step="0.01" value={transferAmount} onChange={(e) => setTransferAmount(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && !loading && handleTransfer()} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600" placeholder="0.00" />
+                                        <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                            Importo
+                                        </label>
+                                        <input 
+                                            type="number" 
+                                            step="0.01" 
+                                            value={transferAmount} 
+                                            onChange={(e) => setTransferAmount(e.target.value)} 
+                                            onKeyPress={(e) => e.key === 'Enter' && !loading && handleTransfer()} 
+                                            className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-purple-600" 
+                                            placeholder="0.00" 
+                                        />
                                         <p className="text-sm text-gray-500 mt-2">
                                             Saldo disponibile: <span className="font-semibold">€{(userData.balance || 0).toFixed(2)}</span>
                                         </p>
                                     </div>
                                     <div className="flex gap-3 mt-6">
-                                        <button onClick={() => setShowTransferModal(false)} disabled={loading} className="flex-1 py-3 bg-gray-200 rounded-lg font-semibold hover:bg-gray-300 transition-all disabled:opacity-50">Annulla</button>
-                                        <button onClick={handleTransfer} disabled={loading} className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2">
-                                            {loading ? <><Loader /> Invio...</> : 'Invia'}
+                                        <button 
+                                            onClick={() => setShowTransferModal(false)} 
+                                            disabled={loading} 
+                                            className="flex-1 py-3 bg-gray-200 rounded-lg font-semibold hover:bg-gray-300 transition-all disabled:opacity-50"
+                                        >
+                                            Annulla
+                                        </button>
+                                        <button 
+                                            onClick={handleTransfer} 
+                                            disabled={loading} 
+                                            className="flex-1 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                                        >
+                                            {loading ? (
+                                                <>
+                                                    <div className="w-5 h-5"><Loader /></div>
+                                                    Invio...
+                                                </>
+                                            ) : (
+                                                'Invia'
+                                            )}
                                         </button>
                                     </div>
                                 </div>
