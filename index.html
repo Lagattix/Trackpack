@@ -1,26 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { CreditCard, Send, LogOut, Plus, ArrowUpRight, ArrowDownLeft, Home, History, Loader } from 'lucide-react';
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-import { getDatabase, ref, set, get, push, onValue } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-
-// Configurazione Firebase
-const firebaseConfig = {
-  apiKey: "AIzaSyADTlqW9GSmEcz4lvdVs8oTAunCtPQTfxA",
-  authDomain: "bang-d64bf.firebaseapp.com",
-  databaseURL: "https://bang-d64bf-default-rtdb.firebaseio.com",
-  projectId: "bang-d64bf",
-  storageBucket: "bang-d64bf.firebasestorage.app",
-  messagingSenderId: "327241018824",
-  appId: "1:327241018824:web:304c5e64494f0abe2a24fd"
-};
-
-// Inizializza Firebase
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
-const auth = getAuth(app);
 
 const BangApp = () => {
+  const [firebaseLoaded, setFirebaseLoaded] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [userData, setUserData] = useState(null);
   const [activeTab, setActiveTab] = useState('home');
@@ -35,29 +17,108 @@ const BangApp = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
+  const [transactions, setTransactions] = useState([]);
 
-  // Monitora autenticazione
+  // Configurazione Firebase
+  const firebaseConfig = {
+    apiKey: "AIzaSyADTlqW9GSmEcz4lvdVs8oTAunCtPQTfxA",
+    authDomain: "bang-d64bf.firebaseapp.com",
+    databaseURL: "https://bang-d64bf-default-rtdb.firebaseio.com",
+    projectId: "bang-d64bf",
+    storageBucket: "bang-d64bf.firebasestorage.app",
+    messagingSenderId: "327241018824",
+    appId: "1:327241018824:web:304c5e64494f0abe2a24fd"
+  };
+
+  // Carica Firebase
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setCurrentUser(user);
-        // Carica dati utente
-        const userRef = ref(db, 'users/' + user.uid);
-        onValue(userRef, (snapshot) => {
-          const data = snapshot.val();
-          if (data) {
-            setUserData(data);
-          }
-          setInitialLoading(false);
-        });
-      } else {
-        setCurrentUser(null);
-        setUserData(null);
-        setInitialLoading(false);
-      }
-    });
+    const loadFirebase = async () => {
+      try {
+        // Carica Firebase scripts
+        const loadScript = (src) => {
+          return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.type = 'module';
+            script.onload = resolve;
+            script.onerror = reject;
+            document.head.appendChild(script);
+          });
+        };
 
-    return () => unsubscribe();
+        // Usa Firebase da CDN
+        const { initializeApp } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js');
+        const { getDatabase, ref, set, get, push, onValue } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js');
+        const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } = await import('https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js');
+
+        // Inizializza Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const auth = getAuth(app);
+
+        // Salva globalmente
+        window.firebaseApp = app;
+        window.firebaseDb = db;
+        window.firebaseAuth = auth;
+        window.firebaseRef = ref;
+        window.firebaseSet = set;
+        window.firebaseGet = get;
+        window.firebasePush = push;
+        window.firebaseOnValue = onValue;
+        window.firebaseCreateUser = createUserWithEmailAndPassword;
+        window.firebaseSignIn = signInWithEmailAndPassword;
+        window.firebaseOnAuthStateChanged = onAuthStateChanged;
+        window.firebaseSignOut = signOut;
+
+        setFirebaseLoaded(true);
+
+        // Monitora autenticazione
+        onAuthStateChanged(auth, async (user) => {
+          if (user) {
+            setCurrentUser(user);
+            // Carica dati utente
+            const userRef = ref(db, 'users/' + user.uid);
+            onValue(userRef, (snapshot) => {
+              const data = snapshot.val();
+              if (data) {
+                setUserData(data);
+              }
+              setInitialLoading(false);
+            });
+
+            // Carica transazioni
+            const transactionsRef = ref(db, 'transactions');
+            onValue(transactionsRef, (snapshot) => {
+              const data = snapshot.val();
+              if (data) {
+                const txArray = Object.entries(data).map(([id, tx]) => ({
+                  id,
+                  ...tx,
+                  type: tx.from === user.uid ? 'sent' : 'received'
+                }))
+                .filter(tx => tx.from === user.uid || tx.to === user.uid)
+                .sort((a, b) => b.timestamp - a.timestamp);
+                
+                setTransactions(txArray);
+              } else {
+                setTransactions([]);
+              }
+            });
+          } else {
+            setCurrentUser(null);
+            setUserData(null);
+            setInitialLoading(false);
+          }
+        });
+
+      } catch (error) {
+        console.error('Errore caricamento Firebase:', error);
+        setInitialLoading(false);
+        alert('Errore nel caricamento di Firebase. Ricarica la pagina.');
+      }
+    };
+
+    loadFirebase();
   }, []);
 
   const handleAuth = async () => {
@@ -69,21 +130,23 @@ const BangApp = () => {
     setLoading(true);
     
     try {
+      const auth = window.firebaseAuth;
+      const db = window.firebaseDb;
+      const ref = window.firebaseRef;
+      const set = window.firebaseSet;
+
       if (authMode === 'login') {
-        // Login
-        await signInWithEmailAndPassword(auth, email, password);
+        await window.firebaseSignIn(auth, email, password);
       } else {
-        // Registrazione
         if (!name) {
           alert('Inserisci il tuo nome');
           setLoading(false);
           return;
         }
 
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await window.firebaseCreateUser(auth, email, password);
         const user = userCredential.user;
         
-        // Crea profilo utente
         const newUserData = {
           uid: user.uid,
           email: user.email,
@@ -141,7 +204,13 @@ const BangApp = () => {
     setLoading(true);
 
     try {
-      // Cerca destinatario per email
+      const db = window.firebaseDb;
+      const ref = window.firebaseRef;
+      const set = window.firebaseSet;
+      const get = window.firebaseGet;
+      const push = window.firebasePush;
+
+      // Cerca destinatario
       const usersRef = ref(db, 'users');
       const snapshot = await get(usersRef);
       
@@ -179,17 +248,15 @@ const BangApp = () => {
         timestamp: now.getTime()
       };
 
-      // Aggiorna saldo mittente
+      // Aggiorna saldi
       const newBalance = userData.balance - amount;
       await set(ref(db, 'users/' + currentUser.uid + '/balance'), newBalance);
 
-      // Aggiorna saldo destinatario
       const recipientSnapshot = await get(ref(db, 'users/' + recipientUid));
       const recipientData = recipientSnapshot.val();
       const recipientNewBalance = (recipientData.balance || 0) + amount;
       await set(ref(db, 'users/' + recipientUid + '/balance'), recipientNewBalance);
 
-      // Salva transazione
       await push(ref(db, 'transactions'), transaction);
 
       setShowTransferModal(false);
@@ -207,41 +274,13 @@ const BangApp = () => {
 
   const handleLogout = async () => {
     try {
-      await auth.signOut();
+      await window.firebaseSignOut(window.firebaseAuth);
     } catch (error) {
       console.error('Errore logout:', error);
     }
   };
 
-  // Carica transazioni
-  const [transactions, setTransactions] = useState([]);
-
-  useEffect(() => {
-    if (!currentUser) return;
-
-    const transactionsRef = ref(db, 'transactions');
-    const unsubscribe = onValue(transactionsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const txArray = Object.entries(data).map(([id, tx]) => ({
-          id,
-          ...tx,
-          type: tx.from === currentUser.uid ? 'sent' : 'received'
-        }))
-        .filter(tx => tx.from === currentUser.uid || tx.to === currentUser.uid)
-        .sort((a, b) => b.timestamp - a.timestamp);
-        
-        setTransactions(txArray);
-      } else {
-        setTransactions([]);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [currentUser]);
-
-  // Loading iniziale
-  if (initialLoading) {
+  if (!firebaseLoaded || initialLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center">
         <div className="text-center text-white">
@@ -252,7 +291,6 @@ const BangApp = () => {
     );
   }
 
-  // Schermata Login/Signup
   if (!currentUser || !userData) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-600 via-purple-700 to-indigo-800 flex items-center justify-center p-4">
@@ -325,10 +363,8 @@ const BangApp = () => {
     );
   }
 
-  // Dashboard principale
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white p-6 pb-32">
         <div className="max-w-4xl mx-auto">
           <div className="flex justify-between items-center mb-8">
@@ -352,7 +388,6 @@ const BangApp = () => {
         </div>
       </div>
 
-      {/* Card principale */}
       <div className="max-w-4xl mx-auto px-4 -mt-20">
         <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
           <div className="grid grid-cols-2 gap-4">
@@ -378,7 +413,6 @@ const BangApp = () => {
           </div>
         </div>
 
-        {/* Navigazione tabs */}
         <div className="flex gap-2 mb-6">
           <button
             onClick={() => setActiveTab('home')}
@@ -400,7 +434,6 @@ const BangApp = () => {
           </button>
         </div>
 
-        {/* Contenuto */}
         {activeTab === 'home' && (
           <div className="bg-white rounded-2xl shadow-lg p-6 mb-6">
             <h3 className="text-xl font-bold mb-4">Ultime transazioni</h3>
@@ -477,7 +510,6 @@ const BangApp = () => {
         )}
       </div>
 
-      {/* Modal trasferimento */}
       {showTransferModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-md w-full p-6">
